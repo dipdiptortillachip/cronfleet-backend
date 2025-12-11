@@ -30,6 +30,8 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+### Mit fish
+
 ``` fish
 cd ~/projects/cronfleet-backend
 python -m venv .venv
@@ -39,6 +41,8 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+### Aufruf der Sites
+
 Die API ist dann erreichbar unter:
-Swagger UI: http://127.0.0.1:8000/docs
-Health-Check: http://127.0.0.1:8000/health
+- Swagger UI: http://127.0.0.1:8000/docs
+- Health-Check: http://127.0.0.1:8000/health
