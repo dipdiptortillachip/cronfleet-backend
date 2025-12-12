@@ -41,7 +41,7 @@ Ziel des Projekts:
 
 ### Mit bash/zsh
 
-```bash
+``` bash
 # Achtung: nur in bash/zsh, nicht in fish
 cd ~/projects/cronfleet-backend
 python -m venv .venv
@@ -56,15 +56,16 @@ uvicorn app.main:app --reload
 ``` bash
 cd ~/projects/cronfleet-backend
 python -m venv .venv
-source .venv/bin/activate.fish
-pip install -r requirements.txt
-
-uvicorn app.main:app --reload
+source .venv/bin/activate.fishProjektziele (Kurzüberblick)
 ```
 
-### Aufruf der API
+In kommenden Milestones geplant:
 
-Nach dem Start ist die API erreichbar unter:
-- Swagger UI → http://127.0.0.1:8000/docs
-- Health-Check → http://127.0.0.1:8000/health
-- Lokale Cronjobs → http://127.0.0.1:8000/crons/local
+- Lokale Crontabs vollständig einlesen:
+    - /etc/crontab
+    - /etc/cron.d/*
+    - User-Crontabs (crontab -l)
+- Cron-Parsing (inkl. Fehlerbehandlung)
+- Berechnung der nächsten Ausführungszeitpunkte mit croniter
+- Erweiterung für Remote-Systeme (SSH)
+- Später: optional SQLite-DB und Web-UI
