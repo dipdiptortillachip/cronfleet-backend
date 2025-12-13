@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
 import os
 
 from app.models import CronJob
-
+from app.services.schedule import compute_next_runs
 
 class LocalCronReader:
     """
@@ -33,7 +33,7 @@ class LocalCronReader:
                 user="root",
                 schedule="0 3 * * *",
                 command="/usr/bin/pacman -Syu --noconfirm",
-                next_runs=[now + timedelta(days=i) for i in range(1, 4)],
+                next_runs=compute_next_runs("0 3 * * *", start=now, count=3),
                 description="Beispiel: nächtliches System-Update (Dummy-Daten).",
             ),
             CronJob(
@@ -42,7 +42,7 @@ class LocalCronReader:
                 user="tortillachip",
                 schedule="30 2 * * 1-5",
                 command="/home/tortillachip/bin/backup-home.sh",
-                next_runs=[now + timedelta(days=i) for i in range(2, 5)],
+                next_runs=compute_next_runs("30 2 * * 1-5", start=now, count=3),
                 description="Beispiel: User-Backup des Home-Verzeichnisses (Dummy-Daten).",
             ),
         ]
@@ -85,7 +85,7 @@ class LocalCronReader:
                     user="root",
                     schedule="0 * * * *",  # Annahme: stündlich
                     command=str(entry),
-                    next_runs=[now + timedelta(hours=i) for i in range(1, 4)],
+                    next_runs=compute_next_runs("0 * * * *", start=now, count=3),
                     description=(
                         "Abgeleitet aus /etc/cron.hourly (Dummy-Schedule: stündlich)."
                     ),
