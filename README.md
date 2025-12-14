@@ -61,11 +61,21 @@ source .venv/bin/activate.fishProjektziele (Kurzüberblick)
 
 In kommenden Milestones geplant:
 
-- Lokale Crontabs vollständig einlesen:
-    - /etc/crontab
-    - /etc/cron.d/*
-    - User-Crontabs (crontab -l)
 - Cron-Parsing (inkl. Fehlerbehandlung)
 - Berechnung der nächsten Ausführungszeitpunkte mit croniter
 - Erweiterung für Remote-Systeme (SSH)
 - Später: optional SQLite-DB und Web-UI
+
+
+### Optional: Root crontab & run-parts Aggregatoren
+
+Standardmäßig liest CronFleet nur den User-Crontab des aktuellen Users (`crontab -l`) und blendet run-parts Aggregatoren (z.B. `/etc/cron.d/0hourly`) aus.
+
+Opt-in Flags:
+
+- Root crontab (non-blocking via sudo -n):
+  - `CRONFLEET_INCLUDE_ROOT_CRONTAB=1`
+
+- run-parts Aggregatoren anzeigen:
+  - `CRONFLEET_INCLUDE_RUN_PARTS=1`
+
