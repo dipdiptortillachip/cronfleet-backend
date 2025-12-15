@@ -45,6 +45,10 @@ class LocalCronReader:
     - run-parts Aggregatoren (z.B. cron.d/0hourly) blende ich standardmäßig aus,
       weil die Einzel-Skripte aus /etc/cron.hourly bereits explizit aufgelistet werden.
     - Mit CRONFLEET_INCLUDE_RUN_PARTS=1 können Aggregatoren wieder eingeblendet werden.
+
+    Milestone 3 (Qualität):
+    - deterministische Sortierung der Ausgabe
+    - robustes Fehlerverhalten: keine API-Crashes, klare Warnings
     """
 
     def _job_sort_key(self, job: CronJob) -> tuple[str, str, str, str, str, str]:
@@ -60,6 +64,50 @@ class LocalCronReader:
             (job.command or ""),
             (job.id or ""),
         )
+
+    def _is_ignorable_line(self, line: str) -> bool:
+        """
+        True, wenn eine Zeile typischerweise kein Cronjob ist (und deshalb ohne Warning ignoriert werden darf):
+        - leer
+        - Kommentar (#)
+        - ENV-Assignment (z.B. PATH=/usr/bin)
+        """
+        s = line.strip()
+        if not s:
+            return True
+        if s.startswith("#"):
+            return True
+
+        # ENV-Assignments: in /etc/crontab und user crontab erlaubt
+        # Typisch: "SHELL=/bin/sh", "PATH=/usr/bin:/bin"
+        first = s.split()[0]
+        if "=" in first and not first.startswith("@"):
+            return True
+
+        return False
+
+    def _safe_next_runs(self, schedule: str, now: datetime, context: str) -> List[datetime]:
+        """
+        Berechnet next_runs robust:
+        - Bei Fehler: Warning + []
+        - Bei @reboot: [] (ohne Warning, weil nicht sinnvoll berechenbar)
+        """
+        s = (schedule or "").strip()
+        if s == "@reboot":
+            return []
+
+        try:
+            runs = compute_next_runs(s, start=now, count=3)
+        except Exception as e:
+            logger.warning("failed to compute next_runs for %s (schedule=%r): %s", context, s, e)
+            return []
+
+        # Wenn compute_next_runs intern schon "[]" zurückgibt, logge ich das als Hinweis
+        # (außer @reboot, das ist oben schon abgefangen).
+        if s and not runs:
+            logger.warning("no next_runs computed for %s (schedule=%r)", context, s)
+
+        return runs
 
     def _is_run_parts_for_dir(self, command: str, target_dir: str) -> bool:
         c = command.strip()
@@ -127,16 +175,19 @@ class LocalCronReader:
         for lineno, line in enumerate(out.splitlines(), start=1):
             parsed = parse_user_cron_line(line)
             if not parsed:
+                if not self._is_ignorable_line(line):
+                    logger.warning("failed to parse user crontab line: %s:%s: %s", username, lineno, line.strip())
                 continue
 
+            job_id = f"user-crontab:{username}:{lineno}"
             jobs.append(
                 CronJob(
-                    id=f"user-crontab:{username}:{lineno}",
+                    id=job_id,
                     system="localhost",
                     user=username,
                     schedule=parsed.schedule,
                     command=parsed.command,
-                    next_runs=compute_next_runs(parsed.schedule, start=now, count=3),
+                    next_runs=self._safe_next_runs(parsed.schedule, now=now, context=job_id),
                     source="user-crontab",
                     description="Quelle: user crontab (crontab -l)",
                 )
@@ -172,16 +223,19 @@ class LocalCronReader:
         for lineno, line in enumerate(out.splitlines(), start=1):
             parsed = parse_user_cron_line(line)
             if not parsed:
+                if not self._is_ignorable_line(line):
+                    logger.warning("failed to parse root crontab line: root:%s: %s", lineno, line.strip())
                 continue
 
+            job_id = f"user-crontab:root:{lineno}"
             jobs.append(
                 CronJob(
-                    id=f"user-crontab:root:{lineno}",
+                    id=job_id,
                     system="localhost",
                     user="root",
                     schedule=parsed.schedule,
                     command=parsed.command,
-                    next_runs=compute_next_runs(parsed.schedule, start=now, count=3),
+                    next_runs=self._safe_next_runs(parsed.schedule, now=now, context=job_id),
                     source="root-crontab",
                     description="Quelle: root user crontab (sudo -n crontab -l)",
                 )
@@ -216,7 +270,7 @@ class LocalCronReader:
                 user="root",
                 schedule="0 3 * * *",
                 command="/usr/bin/pacman -Syu --noconfirm",
-                next_runs=compute_next_runs("0 3 * * *", start=now, count=3),
+                next_runs=self._safe_next_runs("0 3 * * *", now=now, context="dummy:local-root-system-update"),
                 source="dummy",
                 description="Beispiel: nächtliches System-Update (Dummy-Daten).",
             ),
@@ -226,7 +280,7 @@ class LocalCronReader:
                 user=current_user,
                 schedule="30 2 * * 1-5",
                 command=f"/home/{current_user}/bin/backup-home.sh",
-                next_runs=compute_next_runs("30 2 * * 1-5", start=now, count=3),
+                next_runs=self._safe_next_runs("30 2 * * 1-5", now=now, context="dummy:local-user-backup-home"),
                 source="dummy",
                 description="Beispiel: User-Backup des Home-Verzeichnisses (Dummy-Daten).",
             ),
@@ -280,14 +334,15 @@ class LocalCronReader:
             else:
                 desc = f"Quelle: /etc/cron.hourly (Schedule abgeleitet aus run-parts: {inferred_where})."
 
+            job_id = f"cron.hourly-{name}"
             jobs.append(
                 CronJob(
-                    id=f"cron.hourly-{name}",
+                    id=job_id,
                     system="localhost",
                     user="root",
                     schedule=inferred_schedule,
                     command=str(entry),
-                    next_runs=compute_next_runs(inferred_schedule, start=now, count=3),
+                    next_runs=self._safe_next_runs(inferred_schedule, now=now, context=f"/etc/cron.hourly/{name}"),
                     source="/etc/cron.hourly",
                     description=desc,
                 )
@@ -311,16 +366,19 @@ class LocalCronReader:
         for lineno, line in enumerate(lines, start=1):
             parsed = parse_system_cron_line(line)
             if not parsed:
+                if not self._is_ignorable_line(line):
+                    logger.warning("failed to parse system crontab line: /etc/crontab:%s: %s", lineno, line.strip())
                 continue
 
+            job_id = f"etc-crontab:{lineno}"
             jobs.append(
                 CronJob(
-                    id=f"etc-crontab:{lineno}",
+                    id=job_id,
                     system="localhost",
                     user=parsed.user,
                     schedule=parsed.schedule,
                     command=parsed.command,
-                    next_runs=compute_next_runs(parsed.schedule, start=now, count=3),
+                    next_runs=self._safe_next_runs(parsed.schedule, now=now, context=f"/etc/crontab:{lineno}"),
                     source="/etc/crontab",
                     description="Quelle: /etc/crontab",
                 )
@@ -348,16 +406,24 @@ class LocalCronReader:
             for lineno, line in enumerate(lines, start=1):
                 parsed = parse_system_cron_line(line)
                 if not parsed:
+                    if not self._is_ignorable_line(line):
+                        logger.warning(
+                            "failed to parse system cron.d line: /etc/cron.d/%s:%s: %s",
+                            file.name,
+                            lineno,
+                            line.strip(),
+                        )
                     continue
 
+                job_id = f"cron.d:{file.name}:{lineno}"
                 jobs.append(
                     CronJob(
-                        id=f"cron.d:{file.name}:{lineno}",
+                        id=job_id,
                         system="localhost",
                         user=parsed.user,
                         schedule=parsed.schedule,
                         command=parsed.command,
-                        next_runs=compute_next_runs(parsed.schedule, start=now, count=3),
+                        next_runs=self._safe_next_runs(parsed.schedule, now=now, context=f"/etc/cron.d/{file.name}:{lineno}"),
                         source=f"/etc/cron.d/{file.name}",
                         description=f"Quelle: /etc/cron.d/{file.name}",
                     )
