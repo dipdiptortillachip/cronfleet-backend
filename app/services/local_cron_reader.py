@@ -47,6 +47,20 @@ class LocalCronReader:
     - Mit CRONFLEET_INCLUDE_RUN_PARTS=1 können Aggregatoren wieder eingeblendet werden.
     """
 
+    def _job_sort_key(self, job: CronJob) -> tuple[str, str, str, str, str, str]:
+        """
+        Deterministische Sortierung für die API-Ausgabe.
+        Das macht Smoke-Checks und spätere Tests/Diffs reproduzierbar.
+        """
+        return (
+            (job.system or ""),
+            (job.source or ""),
+            (job.user or ""),
+            (job.schedule or ""),
+            (job.command or ""),
+            (job.id or ""),
+        )
+
     def _is_run_parts_for_dir(self, command: str, target_dir: str) -> bool:
         c = command.strip()
         return ("run-parts" in c) and (target_dir in c)
@@ -232,6 +246,9 @@ class LocalCronReader:
 
         # Dedup/Anzeige: run-parts Aggregatoren standardmäßig ausblenden
         jobs = [j for j in jobs if not self._should_hide_run_parts_aggregator(j.command)]
+
+        # Milestone 3: deterministische Reihenfolge für /crons/local
+        jobs.sort(key=self._job_sort_key)
 
         return jobs
 
